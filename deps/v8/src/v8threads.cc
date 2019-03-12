@@ -105,7 +105,7 @@ bool ThreadManager::RestoreThread() {
   // First check whether the current thread has been 'lazily archived', i.e.
   // not archived at all.  If that is the case we put the state storage we
   // had prepared back in the free list, since we didn't need it after all.
-  if (lazily_archived_thread_.Equals(ThreadId::Current())) {
+  if (lazily_archived_thread_ == ThreadId::Current()) {
     lazily_archived_thread_ = ThreadId::Invalid();
     Isolate::PerIsolateThreadData* per_thread =
         isolate_->FindPerThreadDataForThisThread();
@@ -157,13 +157,13 @@ bool ThreadManager::RestoreThread() {
 
 void ThreadManager::Lock() {
   mutex_.Lock();
-  mutex_owner_ = ThreadId::Current();
+  mutex_owner_.store(ThreadId::Current(), std::memory_order_relaxed);
   DCHECK(IsLockedByCurrentThread());
 }
 
 
 void ThreadManager::Unlock() {
-  mutex_owner_ = ThreadId::Invalid();
+  mutex_owner_.store(ThreadId::Invalid(), std::memory_order_relaxed);
   mutex_.Unlock();
 }
 
@@ -238,12 +238,13 @@ ThreadState* ThreadState::Next() {
 // Thread ids must start with 1, because in TLS having thread id 0 can't
 // be distinguished from not having a thread id at all (since NULL is
 // defined as 0.)
-ThreadManager::ThreadManager()
+ThreadManager::ThreadManager(Isolate* isolate)
     : mutex_owner_(ThreadId::Invalid()),
       lazily_archived_thread_(ThreadId::Invalid()),
       lazily_archived_thread_state_(nullptr),
       free_anchor_(nullptr),
-      in_use_anchor_(nullptr) {
+      in_use_anchor_(nullptr),
+      isolate_(isolate) {
   free_anchor_ = new ThreadState(this);
   in_use_anchor_ = new ThreadState(this);
 }
@@ -267,7 +268,7 @@ void ThreadManager::DeleteThreadStateList(ThreadState* anchor) {
 
 
 void ThreadManager::ArchiveThread() {
-  DCHECK(lazily_archived_thread_.Equals(ThreadId::Invalid()));
+  DCHECK_EQ(lazily_archived_thread_, ThreadId::Invalid());
   DCHECK(!IsArchived());
   DCHECK(IsLockedByCurrentThread());
   ThreadState* state = GetFreeThreadState();
@@ -277,9 +278,9 @@ void ThreadManager::ArchiveThread() {
   per_thread->set_thread_state(state);
   lazily_archived_thread_ = ThreadId::Current();
   lazily_archived_thread_state_ = state;
-  DCHECK(state->id().Equals(ThreadId::Invalid()));
+  DCHECK_EQ(state->id(), ThreadId::Invalid());
   state->set_id(CurrentId());
-  DCHECK(!state->id().Equals(ThreadId::Invalid()));
+  DCHECK_NE(state->id(), ThreadId::Invalid());
 }
 
 
@@ -351,7 +352,7 @@ ThreadId ThreadManager::CurrentId() {
 void ThreadManager::TerminateExecution(ThreadId thread_id) {
   for (ThreadState* state = FirstThreadStateInUse(); state != nullptr;
        state = state->Next()) {
-    if (thread_id.Equals(state->id())) {
+    if (thread_id == state->id()) {
       state->set_terminate_on_restore(true);
     }
   }

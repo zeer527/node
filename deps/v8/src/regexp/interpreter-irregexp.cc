@@ -4,8 +4,6 @@
 
 // A simple interpreter for the Irregexp byte code.
 
-#ifdef V8_INTERPRETED_REGEXP
-
 #include "src/regexp/interpreter-irregexp.h"
 
 #include "src/ast/ast.h"
@@ -149,14 +147,12 @@ class BacktrackStack {
   DISALLOW_COPY_AND_ASSIGN(BacktrackStack);
 };
 
-
 template <typename Char>
-static RegExpImpl::IrregexpResult RawMatch(Isolate* isolate,
-                                           const byte* code_base,
-                                           Vector<const Char> subject,
-                                           int* registers,
-                                           int current,
-                                           uint32_t current_char) {
+static IrregexpInterpreter::Result RawMatch(Isolate* isolate,
+                                            const byte* code_base,
+                                            Vector<const Char> subject,
+                                            int* registers, int current,
+                                            uint32_t current_char) {
   const byte* pc = code_base;
   // BacktrackStack ensures that the memory allocated for the backtracking stack
   // is returned to the system or cached if there is no stack being cached at
@@ -177,21 +173,24 @@ static RegExpImpl::IrregexpResult RawMatch(Isolate* isolate,
         UNREACHABLE();
       BYTECODE(PUSH_CP)
         if (--backtrack_stack_space < 0) {
-          return RegExpImpl::RE_EXCEPTION;
+          isolate->StackOverflow();
+          return IrregexpInterpreter::EXCEPTION;
         }
         *backtrack_sp++ = current;
         pc += BC_PUSH_CP_LENGTH;
         break;
       BYTECODE(PUSH_BT)
         if (--backtrack_stack_space < 0) {
-          return RegExpImpl::RE_EXCEPTION;
+          isolate->StackOverflow();
+          return IrregexpInterpreter::EXCEPTION;
         }
         *backtrack_sp++ = Load32Aligned(pc + 4);
         pc += BC_PUSH_BT_LENGTH;
         break;
       BYTECODE(PUSH_REGISTER)
         if (--backtrack_stack_space < 0) {
-          return RegExpImpl::RE_EXCEPTION;
+          isolate->StackOverflow();
+          return IrregexpInterpreter::EXCEPTION;
         }
         *backtrack_sp++ = registers[insn >> BYTECODE_SHIFT];
         pc += BC_PUSH_REGISTER_LENGTH;
@@ -241,9 +240,9 @@ static RegExpImpl::IrregexpResult RawMatch(Isolate* isolate,
         pc += BC_POP_REGISTER_LENGTH;
         break;
       BYTECODE(FAIL)
-        return RegExpImpl::RE_FAILURE;
+      return IrregexpInterpreter::FAILURE;
       BYTECODE(SUCCEED)
-        return RegExpImpl::RE_SUCCESS;
+      return IrregexpInterpreter::SUCCESS;
       BYTECODE(ADVANCE_CP)
         current += insn >> BYTECODE_SHIFT;
         pc += BC_ADVANCE_CP_LENGTH;
@@ -586,19 +585,15 @@ static RegExpImpl::IrregexpResult RawMatch(Isolate* isolate,
   }
 }
 
-
-RegExpImpl::IrregexpResult IrregexpInterpreter::Match(
-    Isolate* isolate,
-    Handle<ByteArray> code_array,
-    Handle<String> subject,
-    int* registers,
-    int start_position) {
+IrregexpInterpreter::Result IrregexpInterpreter::Match(
+    Isolate* isolate, Handle<ByteArray> code_array, Handle<String> subject,
+    int* registers, int start_position) {
   DCHECK(subject->IsFlat());
 
   DisallowHeapAllocation no_gc;
   const byte* code_base = code_array->GetDataStartAddress();
   uc16 previous_char = '\n';
-  String::FlatContent subject_content = subject->GetFlatContent();
+  String::FlatContent subject_content = subject->GetFlatContent(no_gc);
   if (subject_content.IsOneByte()) {
     Vector<const uint8_t> subject_vector = subject_content.ToOneByteVector();
     if (start_position != 0) previous_char = subject_vector[start_position - 1];
@@ -623,5 +618,3 @@ RegExpImpl::IrregexpResult IrregexpInterpreter::Match(
 
 }  // namespace internal
 }  // namespace v8
-
-#endif  // V8_INTERPRETED_REGEXP

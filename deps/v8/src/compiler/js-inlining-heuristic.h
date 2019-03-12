@@ -16,14 +16,16 @@ class JSInliningHeuristic final : public AdvancedReducer {
   enum Mode { kGeneralInlining, kRestrictedInlining, kStressInlining };
   JSInliningHeuristic(Editor* editor, Mode mode, Zone* local_zone,
                       OptimizedCompilationInfo* info, JSGraph* jsgraph,
+                      JSHeapBroker* broker,
                       SourcePositionTable* source_positions)
       : AdvancedReducer(editor),
         mode_(mode),
-        inliner_(editor, local_zone, info, jsgraph, source_positions),
+        inliner_(editor, local_zone, info, jsgraph, broker, source_positions),
         candidates_(local_zone),
         seen_(local_zone),
         source_positions_(source_positions),
-        jsgraph_(jsgraph) {}
+        jsgraph_(jsgraph),
+        broker_(broker) {}
 
   const char* reducer_name() const override { return "JSInliningHeuristic"; }
 
@@ -43,6 +45,9 @@ class JSInliningHeuristic final : public AdvancedReducer {
     // In the case of polymorphic inlining, this tells if each of the
     // functions could be inlined.
     bool can_inline_function[kMaxCallPolymorphism];
+    // Strong references to bytecode to ensure it is not flushed from SFI
+    // while choosing inlining candidates.
+    Handle<BytecodeArray> bytecode[kMaxCallPolymorphism];
     // TODO(2206): For now polymorphic inlining is treated orthogonally to
     // inlining based on SharedFunctionInfo. This should be unified and the
     // above array should be switched to SharedFunctionInfo instead. Currently
@@ -80,6 +85,8 @@ class JSInliningHeuristic final : public AdvancedReducer {
   CommonOperatorBuilder* common() const;
   Graph* graph() const;
   JSGraph* jsgraph() const { return jsgraph_; }
+  // TODO(neis): Make heap broker a component of JSGraph?
+  JSHeapBroker* broker() const { return broker_; }
   Isolate* isolate() const { return jsgraph_->isolate(); }
   SimplifiedOperatorBuilder* simplified() const;
 
@@ -89,6 +96,7 @@ class JSInliningHeuristic final : public AdvancedReducer {
   ZoneSet<NodeId> seen_;
   SourcePositionTable* source_positions_;
   JSGraph* const jsgraph_;
+  JSHeapBroker* const broker_;
   int cumulative_count_ = 0;
 };
 

@@ -12,6 +12,7 @@
 #include "src/heap/factory.h"
 #include "src/macro-assembler.h"
 #include "src/objects-inl.h"
+#include "src/objects/feedback-cell-inl.h"
 #include "test/cctest/test-feedback-vector.h"
 
 namespace v8 {
@@ -88,15 +89,11 @@ TEST(VectorStructure) {
   {
     FeedbackVectorSpec spec(&zone);
     spec.AddForInSlot();
-    spec.AddCreateClosureSlot();
+    spec.AddFeedbackCellForCreateClosure();
     spec.AddForInSlot();
     vector = NewFeedbackVector(isolate, &spec);
     FeedbackVectorHelper helper(vector);
-    CHECK_EQ(1,
-             FeedbackMetadata::GetSlotSize(FeedbackSlotKind::kCreateClosure));
-    FeedbackSlot slot = helper.slot(1);
-    FeedbackCell* cell =
-        FeedbackCell::cast(vector->Get(slot)->GetHeapObjectAssumeStrong());
+    FeedbackCell cell = *vector->GetClosureFeedbackCell(0);
     CHECK_EQ(cell->value(), *factory->undefined_value());
   }
 }
@@ -158,7 +155,9 @@ TEST(VectorICMetadata) {
 
 
 TEST(VectorCallICStates) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -173,18 +172,20 @@ TEST(VectorCallICStates) {
       Handle<FeedbackVector>(f->feedback_vector(), isolate);
   FeedbackSlot slot(0);
   FeedbackNexus nexus(feedback_vector, slot);
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
 
   CompileRun("f(function() { return 16; })");
-  CHECK_EQ(GENERIC, nexus.StateFromFeedback());
+  CHECK_EQ(GENERIC, nexus.ic_state());
 
   // After a collection, state should remain GENERIC.
   CcTest::CollectAllGarbage();
-  CHECK_EQ(GENERIC, nexus.StateFromFeedback());
+  CHECK_EQ(GENERIC, nexus.ic_state());
 }
 
 TEST(VectorCallFeedback) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -201,18 +202,20 @@ TEST(VectorCallFeedback) {
   FeedbackSlot slot(0);
   FeedbackNexus nexus(feedback_vector, slot);
 
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
-  HeapObject* heap_object;
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
+  HeapObject heap_object;
   CHECK(nexus.GetFeedback()->GetHeapObjectIfWeak(&heap_object));
   CHECK_EQ(*foo, heap_object);
 
   CcTest::CollectAllGarbage();
   // It should stay monomorphic even after a GC.
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
 }
 
 TEST(VectorCallFeedbackForArray) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -226,14 +229,14 @@ TEST(VectorCallFeedbackForArray) {
   FeedbackSlot slot(0);
   FeedbackNexus nexus(feedback_vector, slot);
 
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
-  HeapObject* heap_object;
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
+  HeapObject heap_object;
   CHECK(nexus.GetFeedback()->GetHeapObjectIfWeak(&heap_object));
   CHECK_EQ(*isolate->array_function(), heap_object);
 
   CcTest::CollectAllGarbage();
   // It should stay monomorphic even after a GC.
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
 }
 
 size_t GetFeedbackVectorLength(Isolate* isolate, const char* src,
@@ -247,7 +250,9 @@ size_t GetFeedbackVectorLength(Isolate* isolate, const char* src,
 }
 
 TEST(OneShotCallICSlotCount) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -299,7 +304,9 @@ TEST(OneShotCallICSlotCount) {
 }
 
 TEST(VectorCallCounts) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -315,20 +322,22 @@ TEST(VectorCallCounts) {
       Handle<FeedbackVector>(f->feedback_vector(), isolate);
   FeedbackSlot slot(0);
   FeedbackNexus nexus(feedback_vector, slot);
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
 
   CompileRun("f(foo); f(foo);");
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
   CHECK_EQ(3, nexus.GetCallCount());
 
   // Send the IC megamorphic, but we should still have incrementing counts.
   CompileRun("f(function() { return 12; });");
-  CHECK_EQ(GENERIC, nexus.StateFromFeedback());
+  CHECK_EQ(GENERIC, nexus.ic_state());
   CHECK_EQ(4, nexus.GetCallCount());
 }
 
 TEST(VectorConstructCounts) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -344,22 +353,24 @@ TEST(VectorConstructCounts) {
 
   FeedbackSlot slot(0);
   FeedbackNexus nexus(feedback_vector, slot);
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
 
   CHECK(feedback_vector->Get(slot)->IsWeak());
 
   CompileRun("f(Foo); f(Foo);");
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
   CHECK_EQ(3, nexus.GetCallCount());
 
   // Send the IC megamorphic, but we should still have incrementing counts.
   CompileRun("f(function() {});");
-  CHECK_EQ(GENERIC, nexus.StateFromFeedback());
+  CHECK_EQ(GENERIC, nexus.ic_state());
   CHECK_EQ(4, nexus.GetCallCount());
 }
 
 TEST(VectorSpeculationMode) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -391,7 +402,9 @@ TEST(VectorSpeculationMode) {
 }
 
 TEST(VectorLoadICStates) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -407,44 +420,46 @@ TEST(VectorLoadICStates) {
       Handle<FeedbackVector>(f->feedback_vector(), isolate);
   FeedbackSlot slot(0);
   FeedbackNexus nexus(feedback_vector, slot);
-  CHECK_EQ(PREMONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(PREMONOMORPHIC, nexus.ic_state());
 
   CompileRun("f(o)");
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
   // Verify that the monomorphic map is the one we expect.
   v8::MaybeLocal<v8::Value> v8_o =
       CcTest::global()->Get(context.local(), v8_str("o"));
   Handle<JSObject> o =
       Handle<JSObject>::cast(v8::Utils::OpenHandle(*v8_o.ToLocalChecked()));
-  CHECK_EQ(o->map(), nexus.FindFirstMap());
+  CHECK_EQ(o->map(), nexus.GetFirstMap());
 
   // Now go polymorphic.
   CompileRun("f({ blarg: 3, foo: 2 })");
-  CHECK_EQ(POLYMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(POLYMORPHIC, nexus.ic_state());
 
   CompileRun(
       "delete o.foo;"
       "f(o)");
-  CHECK_EQ(POLYMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(POLYMORPHIC, nexus.ic_state());
 
   CompileRun("f({ blarg: 3, torino: 10, foo: 2 })");
-  CHECK_EQ(POLYMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(POLYMORPHIC, nexus.ic_state());
   MapHandles maps;
   nexus.ExtractMaps(&maps);
   CHECK_EQ(4, maps.size());
 
   // Finally driven megamorphic.
   CompileRun("f({ blarg: 3, gran: 3, torino: 10, foo: 2 })");
-  CHECK_EQ(MEGAMORPHIC, nexus.StateFromFeedback());
-  CHECK(!nexus.FindFirstMap());
+  CHECK_EQ(MEGAMORPHIC, nexus.ic_state());
+  CHECK(nexus.GetFirstMap().is_null());
 
   // After a collection, state should not be reset to PREMONOMORPHIC.
   CcTest::CollectAllGarbage();
-  CHECK_EQ(MEGAMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MEGAMORPHIC, nexus.ic_state());
 }
 
 TEST(VectorLoadGlobalICSlotSharing) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -471,15 +486,15 @@ TEST(VectorLoadGlobalICSlotSharing) {
   CHECK_SLOT_KIND(helper, 1, FeedbackSlotKind::kLoadGlobalInsideTypeof);
   FeedbackSlot slot1 = helper.slot(0);
   FeedbackSlot slot2 = helper.slot(1);
-  CHECK_EQ(MONOMORPHIC,
-           FeedbackNexus(feedback_vector, slot1).StateFromFeedback());
-  CHECK_EQ(MONOMORPHIC,
-           FeedbackNexus(feedback_vector, slot2).StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, FeedbackNexus(feedback_vector, slot1).ic_state());
+  CHECK_EQ(MONOMORPHIC, FeedbackNexus(feedback_vector, slot2).ic_state());
 }
 
 
 TEST(VectorLoadICOnSmi) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -496,17 +511,17 @@ TEST(VectorLoadICOnSmi) {
       Handle<FeedbackVector>(f->feedback_vector(), isolate);
   FeedbackSlot slot(0);
   FeedbackNexus nexus(feedback_vector, slot);
-  CHECK_EQ(PREMONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(PREMONOMORPHIC, nexus.ic_state());
 
   CompileRun("f(34)");
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
   // Verify that the monomorphic map is the one we expect.
-  Map* number_map = ReadOnlyRoots(heap).heap_number_map();
-  CHECK_EQ(number_map, nexus.FindFirstMap());
+  Map number_map = ReadOnlyRoots(heap).heap_number_map();
+  CHECK_EQ(number_map, nexus.GetFirstMap());
 
   // Now go polymorphic on o.
   CompileRun("f(o)");
-  CHECK_EQ(POLYMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(POLYMORPHIC, nexus.ic_state());
 
   MapHandles maps;
   nexus.ExtractMaps(&maps);
@@ -529,7 +544,7 @@ TEST(VectorLoadICOnSmi) {
 
   // The degree of polymorphism doesn't change.
   CompileRun("f(100)");
-  CHECK_EQ(POLYMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(POLYMORPHIC, nexus.ic_state());
   MapHandles maps2;
   nexus.ExtractMaps(&maps2);
   CHECK_EQ(2, maps2.size());
@@ -537,7 +552,9 @@ TEST(VectorLoadICOnSmi) {
 
 
 TEST(ReferenceContextAllocatesNoSlots) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
+
   CcTest::InitializeVM();
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
@@ -675,6 +692,7 @@ TEST(ReferenceContextAllocatesNoSlots) {
 
 
 TEST(VectorStoreICBasic) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
 
   CcTest::InitializeVM();
@@ -696,10 +714,11 @@ TEST(VectorStoreICBasic) {
   CHECK_EQ(1, helper.slot_count());
   FeedbackSlot slot(0);
   FeedbackNexus nexus(feedback_vector, slot);
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
 }
 
 TEST(StoreOwnIC) {
+  if (!i::FLAG_use_ic) return;
   if (i::FLAG_always_opt) return;
 
   CcTest::InitializeVM();
@@ -721,7 +740,7 @@ TEST(StoreOwnIC) {
   CHECK_SLOT_KIND(helper, 0, FeedbackSlotKind::kLiteral);
   CHECK_SLOT_KIND(helper, 1, FeedbackSlotKind::kStoreOwnNamed);
   FeedbackNexus nexus(feedback_vector, helper.slot(1));
-  CHECK_EQ(MONOMORPHIC, nexus.StateFromFeedback());
+  CHECK_EQ(MONOMORPHIC, nexus.ic_state());
 }
 
 }  // namespace

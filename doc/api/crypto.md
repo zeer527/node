@@ -1123,7 +1123,7 @@ passing keys as strings or `Buffer`s due to improved security features.
 
 ### keyObject.asymmetricKeySize
 <!-- YAML
-added: REPLACEME
+added: v11.12.0
 -->
 * {number}
 
@@ -1134,7 +1134,7 @@ bytes. This property is `undefined` for symmetric keys.
 <!-- YAML
 added: v11.6.0
 changes:
-  - version: REPLACEME
+  - version: v11.12.0
     pr-url: https://github.com/nodejs/node/pull/26319
     description: Added support for `'ed25519'` and `'ed448'`
 -->

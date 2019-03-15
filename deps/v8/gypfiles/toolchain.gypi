@@ -996,6 +996,7 @@
       ['OS=="win"', {
         'defines': [
           'WIN32',
+          'NOMINMAX',  # Refs: https://chromium-review.googlesource.com/c/v8/v8/+/1456620
         ],
         # 4351: VS 2005 and later are warning us that they've fixed a bug
         #       present in VS 2003 and earlier.
@@ -1393,7 +1394,7 @@
         ],  # conditions
       },  # Release
     },  # configurations
-    'cflags': [ '-Wno-type-limits', ],
+    'cflags!': [ '-Wall', '-Wextra' ],
     'msvs_disabled_warnings': [
       4245,  # Conversion with signed/unsigned mismatch.
       4267,  # Conversion with possible loss of data.
